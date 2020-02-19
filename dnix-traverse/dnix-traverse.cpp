@@ -12,59 +12,58 @@
 #include <stdio.h>
 #include <time.h>
 
-typedef unsigned long daddr_t;
+typedef unsigned int daddr_t;
+typedef unsigned int dnix_time_t;
 
-
-#pragma pack(push, 1)
+#pragma pack(1)
 
 #include "../dnix-headers/diskpar.h"
 #include "../dnix-headers/inode.h"
 #include "../dnix-headers/sysfile.h"
 #include "../dnix-headers/dir.h"
 
-#pragma pack(pop)
 
+#define swap32(num) (((num>>24)&0xff) | ((num<<8)&0xff0000) | ((num>>8)&0xff00) | ((num<<24)&0xff000000)) 
 
 
 class DnixFs {
   struct sysfptr dnixPartitionInfo;
   FILE * image;
  public:
-  DnixFs( FILE * image);
+  DnixFs();
+  void init( FILE * image );
 };
 
 
-struct sysfptr {
-	daddr_t	vdsp;		/* Pointer to volume descriptor block */
-	daddr_t	vdspn;		/* 1:s complement of previous item */
-	daddr_t	cleanfl;	/* Volume clean flag */
-	time_t	timestamp;	/* Timestamp */
-	daddr_t	x[124];		/* Reserved */
-};
-
-
-DixFs:DnixFs(FILE * img) {
+void DnixFs::init(FILE * img) {
   char buffer[26];
+  struct tm * tm_info;
+  time_t tim;
   image = img;
   // Read the partition info
-  fread ( (void * ) dnixPartitionInfo, 512, 1 image);
-  strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", localtime(dnixPartitionInfo.timestamp))
-  printf ("Pointer to volume descriptor block: %08lX", dnixPartitionInfo.vdsp);
-  printf ("1:s complement of previous item: %08lX", dnixPartitionInfo.vdspn);
-  printf ("Volume clean flag: %08lX", dnixPartitionInfo.cleanfl);
-  printf ("Timestamp %s", buffer);
+  fseek (image, 512, SEEK_SET);
+  fread ( (void * ) &dnixPartitionInfo, 512, 1, image);
+  tim = swap32(dnixPartitionInfo.timestamp);
+  tm_info = localtime((time_t *) ( &tim));
+  strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
+  printf ("Pointer to volume descriptor block: %08X\n", swap32(dnixPartitionInfo.vdsp));
+  printf ("1:s complement of previous item: %08X\n", swap32(dnixPartitionInfo.vdspn));
+  printf ("Volume clean flag: %08X\n", swap32(dnixPartitionInfo.cleanfl));
+  printf ("Timestamp %s\n", buffer);
+}
 
+
+DnixFs::DnixFs() {
 }
 
 
 int main (int argc, char ** argv) {
   FILE * image_file;
   int opt;
-  printf("1\n");
+  class DnixFs dnixFs;
   while ((opt = getopt(argc, argv, "d:")) != -1) {
     switch (opt) {
     case 'd':
-      printf("1");
       image_file = fopen (optarg, "r");
       if (image_file == NULL) {
 	perror ("Failure opening file.");
@@ -76,7 +75,7 @@ int main (int argc, char ** argv) {
       exit(EXIT_FAILURE);
     }
   }
-
+  dnixFs.init(image_file);
 }
 
 

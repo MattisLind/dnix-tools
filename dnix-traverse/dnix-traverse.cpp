@@ -12,15 +12,23 @@
 #include <stdio.h>
 #include <time.h>
 
-typedef unsigned int daddr_t;
-typedef unsigned int dnix_time_t;
+typedef unsigned int dnix_daddr_t;
+typedef int dnix_time_t;
 
 #pragma pack(1)
+
+#define daddr_t dnix_daddr_t
+#define time_t dnix_time_t
 
 #include "../dnix-headers/diskpar.h"
 #include "../dnix-headers/inode.h"
 #include "../dnix-headers/sysfile.h"
 #include "../dnix-headers/dir.h"
+
+#undef daddr_t
+#undef time_t
+#define daddr_t daddr_t
+#define time_t time_t
 
 
 #define swap32(num) (((num>>24)&0xff) | ((num<<8)&0xff0000) | ((num>>8)&0xff00) | ((num<<24)&0xff000000)) 

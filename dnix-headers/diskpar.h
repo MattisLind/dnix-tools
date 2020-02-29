@@ -37,7 +37,7 @@ struct sysfptr {
 	daddr_t	vdsp;		/* Pointer to volume descriptor block */
 	daddr_t	vdspn;		/* 1:s complement of previous item */
 	daddr_t	cleanfl;	/* Volume clean flag */
-	dnix_time_t	timestamp;	/* Timestamp */
+	time_t	timestamp;	/* Timestamp */
 	daddr_t	x[124];		/* Reserved */
 };
 

@@ -74,6 +74,9 @@ void DnixFs:: readInode (int inumber, struct dinode * inode) {
   inode->di_mtime = swap32(dinode.di_mtime);
   inode->di_ctime = swap32(dinode.di_ctime);
   memcpy((void *) inode->di_addr, (void *) dinode.di_addr, 40);
+  for (i=0; i<40; i++) {
+    printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
+  }
 
   printf("mode and type of file %04X\n", inode->di_mode);
   printf("number of links to file %d\n", inode->di_nlink);
@@ -174,15 +177,19 @@ public:
 };
 
 
-void DnixFile::init(FILE * image, struct dinode * inode) {
+void DnixFile::init(FILE * img, struct dinode * inode) {
   memcpy (&ino, inode, sizeof (struct dinode));
+  image = img;
 }
 
 void DnixFile::readFileBlock ( int block_no, void * buf ) {
-  int disk_address;
+  long disk_address;
+  int ret;
+  printf("block_no=%d\n",block_no );
   if (block_no<11) {
     // direct blocks
-    disk_address = ino.di_addr[block_no*3] * 65536 + ino.di_addr[block_no*3 + 1]*256 + ino.di_addr[block_no*3 + 2];
+    disk_address = ((((long)(0xff& ino.di_addr[block_no*3])) <<16 ) | (((long)(0xff & ino.di_addr[block_no*3 + 1])) <<8 ) | (ino.di_addr[block_no*3 + 2] & 0xff))<<8;
+    printf ("diskaddress=%08lX\n", disk_address);
   } else if ((block_no > 10) && (block_no < 692)) {
     // address of first indirect block is in block 11.
     disk_address = ino.di_addr[30] * 65536 + ino.di_addr[31]*256 + ino.di_addr[32];
@@ -220,24 +227,55 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
     disk_address = ino.di_addr[(block_no-10)*3] * 65536 + ino.di_addr[(block_no-10)*3 + 1]*256 + ino.di_addr[(block_no-10)*3 + 2];
 
   }
-  fseek (image, disk_address, SEEK_SET);
-  fread (buf, 2048, 1, image);
+  printf ("before fseek\n");
+  ret = fseek (image, disk_address, SEEK_SET);
+  printf ("fseek ret=%d\n", ret);
+  ret = fread (buf, 2048, 1, image);
+  printf ("fread ret=%d\n", ret);
 }
 
 
 DnixFs::DnixFs() {
 }
 
+void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs) {
+  struct direct * dir;
+  class DnixFile * file = new class DnixFile;
+  int size;
+  int block_no;
+  int dir_cnt;
+  struct dinode inode;
+  dnixFs->readInode(inumber, &inode);
+  if (inode.di_mode & 0x4000) {
+    // Directory
+    // Allocate memory
+    dir = (struct direct *) malloc (2048);
+    file->init(image_file, &inode);
+    size = inode.di_size;
+    printf ("size=%d\n", size);
+    block_no = 0;
+    do {
+      file->readFileBlock(block_no, (void * ) dir);
+      // process all the entries in the directory
+      dir_cnt=0;
+      do {
+	printf ("inode: %d name: %s \n", swap16(dir[dir_cnt].d_ino),  dir[dir_cnt].d_name);
+	if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
+	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs);
+	}
+	dir_cnt++;
+      } while (dir_cnt < 256 && swap16(dir[dir_cnt].d_ino) != 0); 
+      size -= 2048;
+      block_no ++;
+    } while (size > 0 && swap16(dir[255].d_ino) !=0 );
+  } else {
+    // Ordinary file
+  }
+}
+
 
 int main (int argc, char ** argv) {
   FILE * image_file;
-  int block_no;
-  int size;
-  class DnixFile file;
-  struct direct * dir;
-  int dir_cnt;
-  int dir_block_cnt;
-  struct dinode inode;
   int opt;
   class DnixFs dnixFs;
   while ((opt = getopt(argc, argv, "d:")) != -1) {
@@ -254,30 +292,9 @@ int main (int argc, char ** argv) {
       exit(EXIT_FAILURE);
     }
   }
+
   dnixFs.init(image_file);
-  dnixFs.readInode(INOROOT, &inode);
-  if (inode.di_mode & 0x8000) {
-    // Directory
-    // Allocate memory
-    dir = (struct direct *) malloc (2048);
-    file.init(image_file, &inode);
-    size = inode.di_size;
-    block_no = 0;
-    do {
-      file.readFileBlock(block_no, (void * ) dir);
-      // process all the entries in the directory
-      dir_cnt=0;
-      do {
-	printf ("%s\n", dir[dir_cnt].d_name);
-	dir_cnt++;
-      } while (dir_cnt < 256 && dir[dir_cnt].d_ino != 0); 
-      size -= 2048;
-      block_no ++;
-    } while (size > 0 && dir[255].d_ino !=0 );
-  } else {
-    // Ordinary file
-  }
-  
+  readDir(INOROOT, image_file, &dnixFs);
 }
 
 

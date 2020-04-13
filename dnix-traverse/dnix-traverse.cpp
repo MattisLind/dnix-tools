@@ -13,22 +13,24 @@
 #include <time.h>
 #include <string.h>
 
-typedef unsigned int dnix_daddr_t;
+typedef unsigned int daddr_t;
 typedef int dnix_time_t;
+typedef int ino_t;
 
 #pragma pack(1)
 
-#define daddr_t dnix_daddr_t
+//#define daddr_t dnix_daddr_t
 #define time_t dnix_time_t
+//#define ino_t dnix_ino_t
 
 #include "../dnix-headers/diskpar.h"
 #include "../dnix-headers/inode.h"
 #include "../dnix-headers/sysfile.h"
 #include "../dnix-headers/dir.h"
 
-#undef daddr_t
+//#undef daddr_t
 #undef time_t
-#define daddr_t daddr_t
+//#define daddr_t daddr_t
 #define time_t time_t
 
 
@@ -56,7 +58,7 @@ void DnixFs:: readInode (int inumber, struct dinode * inode) {
   printf ("inumber  %04X\n", inumber);
   printf ("insiz %04X\n", sysfile.s_insiz);
   printf ("inadr %04X\n", sysfile.s_inadr);
-  printf ("Address to read inode from %04X\n", (inumber-1) * (sizeof dinode) + sysfile.s_inadr);
+  printf ("Address to read inode from %04lX\n", (inumber-1) * (sizeof dinode) + sysfile.s_inadr);
   
   fseek (image, (inumber-1) * (sizeof dinode) + sysfile.s_inadr, SEEK_SET);
   fread ( (void * ) &dinode, sizeof dinode, 1, image);
@@ -173,7 +175,7 @@ public:
 
 
 void DnixFile::init(FILE * image, struct dinode * inode) {
-  memcpy (&ino, inode, sizeof inode);
+  memcpy (&ino, inode, sizeof (struct dinode));
 }
 
 void DnixFile::readFileBlock ( int block_no, void * buf ) {

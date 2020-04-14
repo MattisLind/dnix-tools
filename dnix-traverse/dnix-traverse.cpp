@@ -50,11 +50,11 @@ class DnixFs {
  public:
   DnixFs();
   void init( FILE * image );
-  void readInode (int inumber, struct dinode * inode);
+  bool readInode (int inumber, struct dinode * inode);
 };
 
 
-void DnixFs:: readInode (int inumber, struct dinode * inode) {
+bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   struct dinode dinode;
   char buffer[26];
   struct tm * tm_info;
@@ -64,7 +64,10 @@ void DnixFs:: readInode (int inumber, struct dinode * inode) {
   printf ("insiz %04X\n", sysfile.s_insiz);
   printf ("inadr %04X\n", sysfile.s_inadr);
   printf ("Address to read inode from %04lX\n", (inumber-1) * (sizeof dinode) + sysfile.s_inadr);
-  
+  if (((inumber-1) * (sizeof dinode) + sysfile.s_inadr) > sysfile.s_insiz) {
+    printf ("******************* invalid inode address. Refusing. It is outide valid range.\n");
+    return false;
+  }
   fseek (image, (inumber-1) * (sizeof dinode) + sysfile.s_inadr, SEEK_SET);
   fread ( (void * ) &dinode, sizeof dinode, 1, image);
 
@@ -105,7 +108,7 @@ void DnixFs:: readInode (int inumber, struct dinode * inode) {
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
   printf("time inode last modified %s\n", buffer);
-
+  return true;
 
 }
 
@@ -295,9 +298,11 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
   FILE *output;
   int block_no;
   int dir_cnt;
+  bool ret;
   struct dinode inode;
   printf("Processing path=%s\n", path);
-  dnixFs->readInode(inumber, &inode);
+  ret = dnixFs->readInode(inumber, &inode);
+  if (!ret) return;
   dir = (struct direct *) malloc (2048);
   file->init(image_file, &inode);
   size = inode.di_size;
@@ -314,19 +319,23 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
       do {
 	printf ("inode: %d name: %s \n", swap16(dir[dir_cnt].d_ino),  dir[dir_cnt].d_name);
 	if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
+	  memset(p,0,sizeof p);
 	  strcpy(p, path);
 	  strcat(p, slash);
-	  strcat(p, dir[dir_cnt].d_name);
+	  strncat(p, dir[dir_cnt].d_name,14);
 	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p);
 	}
 	dir_cnt++;
-      } while (dir_cnt < 256 && swap16(dir[dir_cnt].d_ino) != 0); 
+	printf("dir_cnt=%d\n", dir_cnt);
+      } while ((dir_cnt < 128) && (swap16(dir[dir_cnt].d_ino) != 0)); 
       size -= 2048;
       block_no ++;
     } while (size > 0 && swap16(dir[255].d_ino) !=0 );
   } else {    
     // Ordinary file
     output = fopen (path, "w");
+    chmod (path, inode.di_mode & 07777);
+    chown (path, inode.di_gid, inode.di_uid);
     do {
       file->readFileBlock(block_no, (void * ) dir);
       if (size >= 2048) {
@@ -337,6 +346,7 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
       size -= 2048;
       block_no ++;
     } while (size > 0);
+    fclose(output);
   }
 }
 

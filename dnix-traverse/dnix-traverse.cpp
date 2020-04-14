@@ -12,27 +12,32 @@
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
+#include <limits.h>     /* PATH_MAX */
+
+#include <errno.h>
 
 typedef unsigned int daddr_t;
 typedef int dnix_time_t;
-typedef int ino_t;
+typedef int dnix_ino_t;
 
 #pragma pack(1)
 
 //#define daddr_t dnix_daddr_t
 #define time_t dnix_time_t
-//#define ino_t dnix_ino_t
+#define ino_t dnix_ino_t
 
 #include "../dnix-headers/diskpar.h"
 #include "../dnix-headers/inode.h"
 #include "../dnix-headers/sysfile.h"
 #include "../dnix-headers/dir.h"
 
+#undef ino_t
 //#undef daddr_t
 #undef time_t
 //#define daddr_t daddr_t
 #define time_t time_t
 
+#include <sys/stat.h>   /* mkdir(2) */
 
 #define swap32(num) (((num>>24)&0xff) | ((num<<8)&0xff0000) | ((num>>8)&0xff00) | ((num<<24)&0xff000000)) 
 
@@ -74,9 +79,9 @@ void DnixFs:: readInode (int inumber, struct dinode * inode) {
   inode->di_mtime = swap32(dinode.di_mtime);
   inode->di_ctime = swap32(dinode.di_ctime);
   memcpy((void *) inode->di_addr, (void *) dinode.di_addr, 40);
-  for (i=0; i<40; i++) {
-    printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
-  }
+  //for (i=0; i<40; i++) {
+  //  printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
+  //}
 
   printf("mode and type of file %04X\n", inode->di_mode);
   printf("number of links to file %d\n", inode->di_nlink);
@@ -192,24 +197,25 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
     printf ("diskaddress=%08lX\n", disk_address);
   } else if ((block_no > 10) && (block_no < 692)) {
     // address of first indirect block is in block 11.
-    disk_address = ino.di_addr[30] * 65536 + ino.di_addr[31]*256 + ino.di_addr[32];
+    disk_address = ((((long)(0xff& ino.di_addr[30])) <<16 ) | (((long)(0xff & ino.di_addr[31])) <<8 ) | (ino.di_addr[32] & 0xff))<<8;
     if (disk_address != indir_level_one_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_one, 2048, 1, image);
     }
-    disk_address = indir_level_one[(block_no-10)*3] * 65536 + indir_level_one[(block_no-10)*3 + 1]*256 + indir_level_one[(block_no-10)*3 + 2];
+    disk_address = ((((long)(0xff& indir_level_one[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
 
     // First level of indirect block
   } else if ((block_no > 693) && (block_no < 465816)) {
     
     // Second level of indirect block
-    disk_address = ino.di_addr[33] * 65536 + ino.di_addr[34]*256 + ino.di_addr[35];
+    disk_address = ((((long)(0xff& ino.di_addr[33])) <<16 ) | (((long)(0xff & ino.di_addr[34])) <<8 ) | (ino.di_addr[35] & 0xff))<<8;
     if (disk_address != indir_level_two_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_two, 2048, 1, image);
       indir_level_two_block_no = disk_address;
     }
-    disk_address = indir_level_two[((block_no-693)/682)*3] * 65536 + indir_level_two[((block_no-693)/682)*3 + 1]*256 + indir_level_two[((block_no-693)/682)*3 + 2];
+    //disk_address = ((((long)(0xff& indir_level_two[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
+    //disk_address = indir_level_two[((block_no-693)/682)*3] * 65536 + indir_level_two[((block_no-693)/682)*3 + 1]*256 + indir_level_two[((block_no-693)/682)*3 + 2];
     if (disk_address != indir_level_one_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_one, 2048, 1, image);
@@ -238,21 +244,68 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
 DnixFs::DnixFs() {
 }
 
-void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs) {
+
+int mkdir_p(const char *path)
+{
+  /* Adapted from http://stackoverflow.com/a/2336245/119527 */
+  const size_t len = strlen(path);
+  char _path[PATH_MAX];
+  char *p; 
+
+  errno = 0;
+
+  /* Copy string so its mutable */
+  if (len > sizeof(_path)-1) {
+    errno = ENAMETOOLONG;
+    return -1; 
+  }   
+  strcpy(_path, path);
+
+  /* Iterate the string */
+  for (p = _path + 1; *p; p++) {
+    if (*p == '/') {
+      /* Temporarily truncate */
+      *p = '\0';
+
+      if (mkdir(_path, S_IRWXU) != 0) {
+	if (errno != EEXIST)
+	  return -1; 
+      }
+
+      *p = '/';
+    }
+  }   
+
+  if (mkdir(_path, S_IRWXU) != 0) {
+    if (errno != EEXIST)
+      return -1; 
+  }   
+
+  return 0;
+}
+
+
+
+void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path) {
+  char p [1024];
+  const char * slash = "/";
   struct direct * dir;
   class DnixFile * file = new class DnixFile;
   int size;
+  FILE *output;
   int block_no;
   int dir_cnt;
   struct dinode inode;
+  printf("Processing path=%s\n", path);
   dnixFs->readInode(inumber, &inode);
+  dir = (struct direct *) malloc (2048);
+  file->init(image_file, &inode);
+  size = inode.di_size;
+  printf ("size=%d\n", size);
   if (inode.di_mode & 0x4000) {
+    mkdir_p(path);
     // Directory
     // Allocate memory
-    dir = (struct direct *) malloc (2048);
-    file->init(image_file, &inode);
-    size = inode.di_size;
-    printf ("size=%d\n", size);
     block_no = 0;
     do {
       file->readFileBlock(block_no, (void * ) dir);
@@ -261,15 +314,29 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs) {
       do {
 	printf ("inode: %d name: %s \n", swap16(dir[dir_cnt].d_ino),  dir[dir_cnt].d_name);
 	if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
-	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs);
+	  strcpy(p, path);
+	  strcat(p, slash);
+	  strcat(p, dir[dir_cnt].d_name);
+	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p);
 	}
 	dir_cnt++;
       } while (dir_cnt < 256 && swap16(dir[dir_cnt].d_ino) != 0); 
       size -= 2048;
       block_no ++;
     } while (size > 0 && swap16(dir[255].d_ino) !=0 );
-  } else {
+  } else {    
     // Ordinary file
+    output = fopen (path, "w");
+    do {
+      file->readFileBlock(block_no, (void * ) dir);
+      if (size >= 2048) {
+	fwrite(dir, 1, 2048, output);
+      } else {
+	fwrite(dir, 1, size, output);
+      }
+      size -= 2048;
+      block_no ++;
+    } while (size > 0);
   }
 }
 
@@ -294,7 +361,7 @@ int main (int argc, char ** argv) {
   }
 
   dnixFs.init(image_file);
-  readDir(INOROOT, image_file, &dnixFs);
+  readDir(INOROOT, image_file, &dnixFs, (char *) ".");
 }
 
 

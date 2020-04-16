@@ -38,6 +38,9 @@ typedef int dnix_ino_t;
 #define time_t time_t
 
 #include <sys/stat.h>   /* mkdir(2) */
+//#include <sys/types.h>
+#include <utime.h>
+
 
 #define swap32(num) (((num>>24)&0xff) | ((num<<8)&0xff0000) | ((num>>8)&0xff00) | ((num<<24)&0xff000000)) 
 
@@ -60,12 +63,12 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   struct tm * tm_info;
   time_t tim;
   int i;
-  printf ("inumber  %04X\n", inumber);
-  printf ("insiz %04X\n", sysfile.s_insiz);
-  printf ("inadr %04X\n", sysfile.s_inadr);
-  printf ("Address to read inode from %04lX\n", (inumber-1) * (sizeof dinode) + sysfile.s_inadr);
+  //printf ("inumber  %04X\n", inumber);
+  //printf ("insiz %04X\n", sysfile.s_insiz);
+  //printf ("inadr %04X\n", sysfile.s_inadr);
+  //printf ("Address to read inode from %04lX\n", (inumber-1) * (sizeof dinode) + sysfile.s_inadr);
   if (((inumber-1) * (sizeof dinode) + sysfile.s_inadr) > sysfile.s_insiz) {
-    printf ("******************* invalid inode address. Refusing. It is outide valid range.\n");
+    //printf ("******************* invalid inode address. Refusing. It is outide valid range.\n");
     return false;
   }
   fseek (image, (inumber-1) * (sizeof dinode) + sysfile.s_inadr, SEEK_SET);
@@ -78,7 +81,6 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   inode->di_gid = swap16(dinode.di_gid);
   inode->di_size = swap32(dinode.di_size);
   inode->di_atime = swap32(dinode.di_atime);
-  inode->di_atime = swap32(dinode.di_atime);
   inode->di_mtime = swap32(dinode.di_mtime);
   inode->di_ctime = swap32(dinode.di_ctime);
   memcpy((void *) inode->di_addr, (void *) dinode.di_addr, 40);
@@ -86,28 +88,28 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   //  printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
   //}
 
-  printf("mode and type of file %04X\n", inode->di_mode);
-  printf("number of links to file %d\n", inode->di_nlink);
-  printf("owner's user id %d\n", inode->di_uid);
-  printf("owner's group id %d\n", inode->di_gid);
-  printf("number of bytes in file %d\n", inode->di_size);
+  //printf("mode and type of file %04X\n", inode->di_mode);
+  //printf("number of links to file %d\n", inode->di_nlink);
+  //printf("owner's user id %d\n", inode->di_uid);
+  //printf("owner's group id %d\n", inode->di_gid);
+  //printf("number of bytes in file %d\n", inode->di_size);
 
   tim = inode->di_atime;
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
-  printf("time last accessed %s\n", buffer);
+  //printf("time last accessed %s\n", buffer);
 
   tim = inode->di_mtime;
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
-  printf("time last modified %s\n", buffer);
+  //printf("time last modified %s\n", buffer);
   tim = inode->di_ctime;
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
-  printf("time inode last modified %s\n", buffer);
+  //printf("time inode last modified %s\n", buffer);
   return true;
 
 }
@@ -128,10 +130,10 @@ void DnixFs::init(FILE * img) {
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
   superblock_address = swap32(dnixPartitionInfo.vdsp);
-  printf ("Pointer to volume descriptor block: %08X\n", superblock_address);
-  printf ("1:s complement of previous item: %08X\n", swap32(dnixPartitionInfo.vdspn));
-  printf ("Volume clean flag: %08X\n", swap32(dnixPartitionInfo.cleanfl));
-  printf ("Timestamp %s\n", buffer);
+  //printf ("Pointer to volume descriptor block: %08X\n", superblock_address);
+  //printf ("1:s complement of previous item: %08X\n", swap32(dnixPartitionInfo.vdspn));
+  //printf ("Volume clean flag: %08X\n", swap32(dnixPartitionInfo.cleanfl));
+  //printf ("Timestamp %s\n", buffer);
   
   fseek (image, superblock_address, SEEK_SET);
   fread ( (void *) &s, sizeof sysfile, 1, image);
@@ -149,22 +151,22 @@ void DnixFs::init(FILE * img) {
   sysfile.s_insiz = swap32(s.s_insiz);
   sysfile.s_time = swap32(s.s_time); 
   
-  printf ("Bitmap pointer: %08X\n", sysfile.s_bmadr);
-  printf ("Inode list pointer: %08X\n", sysfile.s_inadr);
-  printf ("Root file pointer: %08X\n", sysfile.s_rtadr);
-  printf ("Swap area: %08X\n", sysfile.s_swadr);
-  printf ("Volume size: %d\n", sysfile.s_vlsiz);
-  printf ("Bitmap size: %d\n", sysfile.s_bmsiz);
-  printf ("Swap area size: %d\n", sysfile.s_swsiz);
-  printf ("Block size: %d\n", sysfile.s_bksiz);
-  printf ("Size of a directory entry: %d\n", sysfile.s_disiz);
-  printf ("Default size of inode list: %08X\n", sysfile.s_insiz);
+  //printf ("Bitmap pointer: %08X\n", sysfile.s_bmadr);
+  //printf ("Inode list pointer: %08X\n", sysfile.s_inadr);
+  //printf ("Root file pointer: %08X\n", sysfile.s_rtadr);
+  //printf ("Swap area: %08X\n", sysfile.s_swadr);
+  //printf ("Volume size: %d\n", sysfile.s_vlsiz);
+  //printf ("Bitmap size: %d\n", sysfile.s_bmsiz);
+  //printf ("Swap area size: %d\n", sysfile.s_swsiz);
+  //printf ("Block size: %d\n", sysfile.s_bksiz);
+  //printf ("Size of a directory entry: %d\n", sysfile.s_disiz);
+  //printf ("Default size of inode list: %08X\n", sysfile.s_insiz);
 
   tim = sysfile.s_time;
   
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
-  printf ("Time initiated: %s\n", buffer);
+  //printf ("Time initiated: %s\n", buffer);
 }
 
 // Read a file - block number as specified  - store in buf
@@ -193,11 +195,13 @@ void DnixFile::init(FILE * img, struct dinode * inode) {
 void DnixFile::readFileBlock ( int block_no, void * buf ) {
   long disk_address;
   int ret;
-  printf("block_no=%d\n",block_no );
+  int level2blockno;
+  int level1blockno;
+  //printf("block_no=%d\n",block_no );
   if (block_no<11) {
     // direct blocks
     disk_address = ((((long)(0xff& ino.di_addr[block_no*3])) <<16 ) | (((long)(0xff & ino.di_addr[block_no*3 + 1])) <<8 ) | (ino.di_addr[block_no*3 + 2] & 0xff))<<8;
-    printf ("diskaddress=%08lX\n", disk_address);
+    //printf ("diskaddress=%08lX\n", disk_address);
   } else if ((block_no > 10) && (block_no < 692)) {
     // address of first indirect block is in block 11.
     disk_address = ((((long)(0xff& ino.di_addr[30])) <<16 ) | (((long)(0xff & ino.di_addr[31])) <<8 ) | (ino.di_addr[32] & 0xff))<<8;
@@ -208,8 +212,8 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
     disk_address = ((((long)(0xff& indir_level_one[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
 
     // First level of indirect block
-  } else if ((block_no > 693) && (block_no < 465816)) {
-    
+  } else if ((block_no >= 692) && (block_no < 465816)) {
+    printf("VERY LONG FILE!!!  block_no=%d\n", block_no);
     // Second level of indirect block
     disk_address = ((((long)(0xff& ino.di_addr[33])) <<16 ) | (((long)(0xff & ino.di_addr[34])) <<8 ) | (ino.di_addr[35] & 0xff))<<8;
     if (disk_address != indir_level_two_block_no) {
@@ -217,14 +221,19 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
       fread (indir_level_two, 2048, 1, image);
       indir_level_two_block_no = disk_address;
     }
-    //disk_address = ((((long)(0xff& indir_level_two[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
-    //disk_address = indir_level_two[((block_no-693)/682)*3] * 65536 + indir_level_two[((block_no-693)/682)*3 + 1]*256 + indir_level_two[((block_no-693)/682)*3 + 2];
+
+    level2blockno = ((block_no-692)/682)*3;
+    printf ("Indirect block level 2 = %d\n", level2blockno);
+    disk_address = ((((long)(0xff& indir_level_two[level2blockno])) <<16 ) | (((long)(0xff & indir_level_two[level2blockno+1])) <<8 ) | (indir_level_two[level2blockno + 2] & 0xff))<<8;
+    //disk_address = indir_level_two[((block_no-692)/682)*3] * 65536 + indir_level_two[((block_no-692)/682)*3 + 1]*256 + indir_level_two[((block_no-692)/682)*3 + 2];
     if (disk_address != indir_level_one_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_one, 2048, 1, image);
       indir_level_one_block_no = disk_address;
     }
-    disk_address = indir_level_one[(block_no-10)*3] * 65536 + indir_level_one[(block_no-10)*3 + 1]*256 + indir_level_one[(block_no-10)*3 + 2];
+    level1blockno = ((block_no-692) % 682) * 3;
+    printf ("Indirect block level 1 = %d\n", level1blockno);
+    disk_address = ((0xff&indir_level_one[level1blockno]) << 16) |  ((0xff&indir_level_one[level1blockno + 1]) << 8) | (0xff & indir_level_one[level1blockno + 2]);
 
   } else {
     // Third level of indirect block 
@@ -236,11 +245,11 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
     disk_address = ino.di_addr[(block_no-10)*3] * 65536 + ino.di_addr[(block_no-10)*3 + 1]*256 + ino.di_addr[(block_no-10)*3 + 2];
 
   }
-  printf ("before fseek\n");
+  //printf ("before fseek\n");
   ret = fseek (image, disk_address, SEEK_SET);
-  printf ("fseek ret=%d\n", ret);
+  //printf ("fseek ret=%d\n", ret);
   ret = fread (buf, 2048, 1, image);
-  printf ("fread ret=%d\n", ret);
+  //printf ("fread ret=%d\n", ret);
 }
 
 
@@ -299,14 +308,15 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
   int block_no;
   int dir_cnt;
   bool ret;
+  struct utimbuf timebuf;
   struct dinode inode;
-  printf("Processing path=%s\n", path);
+  //printf("Processing path=%s\n", path);
   ret = dnixFs->readInode(inumber, &inode);
   if (!ret) return;
   dir = (struct direct *) malloc (2048);
   file->init(image_file, &inode);
   size = inode.di_size;
-  printf ("size=%d\n", size);
+  //printf ("size=%d\n", size);
   if (inode.di_mode & 0x4000) {
     mkdir_p(path);
     // Directory
@@ -317,7 +327,7 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
       // process all the entries in the directory
       dir_cnt=0;
       do {
-	printf ("inode: %d name: %s \n", swap16(dir[dir_cnt].d_ino),  dir[dir_cnt].d_name);
+	//printf ("inode: %d name: %s \n", swap16(dir[dir_cnt].d_ino),  dir[dir_cnt].d_name);
 	if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
 	  memset(p,0,sizeof p);
 	  strcpy(p, path);
@@ -326,7 +336,7 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
 	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p);
 	}
 	dir_cnt++;
-	printf("dir_cnt=%d\n", dir_cnt);
+	// printf("dir_cnt=%d\n", dir_cnt);
       } while ((dir_cnt < 128) && (swap16(dir[dir_cnt].d_ino) != 0)); 
       size -= 2048;
       block_no ++;
@@ -336,6 +346,9 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
     output = fopen (path, "w");
     chmod (path, inode.di_mode & 07777);
     chown (path, inode.di_gid, inode.di_uid);
+    timebuf.actime = inode.di_atime;
+    timebuf.modtime = inode.di_mtime;
+    utime(path, &timebuf);
     do {
       file->readFileBlock(block_no, (void * ) dir);
       if (size >= 2048) {

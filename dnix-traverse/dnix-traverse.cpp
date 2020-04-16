@@ -84,15 +84,15 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   inode->di_mtime = swap32(dinode.di_mtime);
   inode->di_ctime = swap32(dinode.di_ctime);
   memcpy((void *) inode->di_addr, (void *) dinode.di_addr, 40);
-  //for (i=0; i<40; i++) {
-  //  printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
-  //}
+  for (i=0; i<40; i++) {
+    printf ("di_addr[%d] = %02X  %02X\n",  i, inode->di_addr[i], dinode.di_addr[i]);
+  }
 
-  //printf("mode and type of file %04X\n", inode->di_mode);
-  //printf("number of links to file %d\n", inode->di_nlink);
-  //printf("owner's user id %d\n", inode->di_uid);
-  //printf("owner's group id %d\n", inode->di_gid);
-  //printf("number of bytes in file %d\n", inode->di_size);
+  printf("mode and type of file %04X\n", inode->di_mode);
+  printf("number of links to file %d\n", inode->di_nlink);
+  printf("owner's user id %d\n", inode->di_uid);
+  printf("owner's group id %d\n", inode->di_gid);
+  printf("number of bytes in file %d\n", inode->di_size);
 
   tim = inode->di_atime;
   tm_info = localtime((time_t *) ( &tim));
@@ -175,11 +175,11 @@ void DnixFs::init(FILE * img) {
 class DnixFile {
   struct dinode ino;
   FILE * image;
-  char indir_level_one [2048];
+  int indir_level_one [512];
   int  indir_level_one_block_no;
-  char indir_level_two [2048];
+  int indir_level_two [512];
   int  indir_level_two_block_no;
-  char indir_level_three [2048];
+  int indir_level_three [512];
   int  indir_level_three_block_no;
 public:
   void init( FILE * image, struct dinode * inode );
@@ -197,24 +197,27 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
   int ret;
   int level2blockno;
   int level1blockno;
-  //printf("block_no=%d\n",block_no );
+  printf("block_no=%d\n",block_no );
   if (block_no<11) {
     // direct blocks
     disk_address = ((((long)(0xff& ino.di_addr[block_no*3])) <<16 ) | (((long)(0xff & ino.di_addr[block_no*3 + 1])) <<8 ) | (ino.di_addr[block_no*3 + 2] & 0xff))<<8;
-    //printf ("diskaddress=%08lX\n", disk_address);
-  } else if ((block_no > 10) && (block_no < 692)) {
+    printf ("diskaddress=%08lX\n", disk_address);
+  } else if ((block_no > 10) && (block_no < 522)) {
     // address of first indirect block is in block 11.
     disk_address = ((((long)(0xff& ino.di_addr[30])) <<16 ) | (((long)(0xff & ino.di_addr[31])) <<8 ) | (ino.di_addr[32] & 0xff))<<8;
+    printf ("Indirect disk address 1 = %08lX\n", disk_address);
     if (disk_address != indir_level_one_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_one, 2048, 1, image);
     }
-    disk_address = ((((long)(0xff& indir_level_one[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
-
+    disk_address = swap32(indir_level_one[block_no-11]);
+    //disk_address = ((((long)(0xff& indir_level_one[(block_no-10)*3])) <<16 ) | (((long)(0xff & indir_level_one[(block_no-10)*3 + 1])) <<8 ) | (indir_level_one[(block_no-10)*3 + 2] & 0xff))<<8;
+    printf ("Indirect address level 2 = %08lX\n", disk_address);
     // First level of indirect block
-  } else if ((block_no >= 692) && (block_no < 465816)) {
+  } else if ((block_no >= 522) && (block_no < 262666)) {
     printf("VERY LONG FILE!!!  block_no=%d\n", block_no);
     // Second level of indirect block
+
     disk_address = ((((long)(0xff& ino.di_addr[33])) <<16 ) | (((long)(0xff & ino.di_addr[34])) <<8 ) | (ino.di_addr[35] & 0xff))<<8;
     if (disk_address != indir_level_two_block_no) {
       fseek (image, disk_address, SEEK_SET);
@@ -222,18 +225,22 @@ void DnixFile::readFileBlock ( int block_no, void * buf ) {
       indir_level_two_block_no = disk_address;
     }
 
-    level2blockno = ((block_no-692)/682)*3;
+    level2blockno = (block_no-522)>>9;
     printf ("Indirect block level 2 = %d\n", level2blockno);
-    disk_address = ((((long)(0xff& indir_level_two[level2blockno])) <<16 ) | (((long)(0xff & indir_level_two[level2blockno+1])) <<8 ) | (indir_level_two[level2blockno + 2] & 0xff))<<8;
+    disk_address = swap32(*(indir_level_two+level2blockno));
+    printf ("disk_address = %08lX\n", disk_address);
+    //disk_address = ((((long)(0xff& indir_level_two[level2blockno])) <<16 ) | (((long)(0xff & indir_level_two[level2blockno+1])) <<8 ) | (indir_level_two[level2blockno + 2] & 0xff))<<8;
     //disk_address = indir_level_two[((block_no-692)/682)*3] * 65536 + indir_level_two[((block_no-692)/682)*3 + 1]*256 + indir_level_two[((block_no-692)/682)*3 + 2];
     if (disk_address != indir_level_one_block_no) {
       fseek (image, disk_address, SEEK_SET);
       fread (indir_level_one, 2048, 1, image);
       indir_level_one_block_no = disk_address;
     }
-    level1blockno = ((block_no-692) % 682) * 3;
+    level1blockno = (block_no-522) & 0x1ff;
     printf ("Indirect block level 1 = %d\n", level1blockno);
-    disk_address = ((0xff&indir_level_one[level1blockno]) << 16) |  ((0xff&indir_level_one[level1blockno + 1]) << 8) | (0xff & indir_level_one[level1blockno + 2]);
+    disk_address = swap32(*(indir_level_one+level1blockno));
+    printf ("disk_address = %08lX\n", disk_address);
+    //disk_address = ((0xff&indir_level_one[level1blockno]) << 16) |  ((0xff&indir_level_one[level1blockno + 1]) << 8) | (0xff & indir_level_one[level1blockno + 2]);
 
   } else {
     // Third level of indirect block 
@@ -305,18 +312,18 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
   class DnixFile * file = new class DnixFile;
   int size;
   FILE *output;
-  int block_no;
+  int block_no=0;
   int dir_cnt;
   bool ret;
   struct utimbuf timebuf;
   struct dinode inode;
-  //printf("Processing path=%s\n", path);
+  printf("Processing path=%s\n", path);
   ret = dnixFs->readInode(inumber, &inode);
   if (!ret) return;
   dir = (struct direct *) malloc (2048);
   file->init(image_file, &inode);
   size = inode.di_size;
-  //printf ("size=%d\n", size);
+  printf ("size=%d\n", size);
   if (inode.di_mode & 0x4000) {
     mkdir_p(path);
     // Directory

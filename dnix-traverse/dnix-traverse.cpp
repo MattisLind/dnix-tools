@@ -5,7 +5,7 @@
   Program to list and extract files from a DNIX FS. Should also be able to write to a DNIX file system. Possibly even add boot code and other things.
 
  */
-
+#define _POSIX_SOURCE 1
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -16,12 +16,12 @@
 
 #include <errno.h>
 
-typedef unsigned int daddr_t;
+typedef unsigned int dnix_daddr_t;
 typedef int dnix_time_t;
 typedef int dnix_ino_t;
 
 #pragma pack(1)
-
+#define daddr_t dnix_daddr_t
 #define time_t dnix_time_t
 #define ino_t dnix_ino_t
 
@@ -32,6 +32,7 @@ typedef int dnix_ino_t;
 
 #undef ino_t
 #undef time_t
+#undef daddr_t
 #define time_t time_t
 
 #include <sys/stat.h>   /* mkdir(2) */

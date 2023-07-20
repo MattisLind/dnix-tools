@@ -5,7 +5,9 @@
   Program to list and extract files from a DNIX FS. Should also be able to write to a DNIX file system. Possibly even add boot code and other things.
 
  */
+#ifdef __linux__
 #define _POSIX_SOURCE 1
+#endif
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -32,7 +34,10 @@ typedef int dnix_ino_t;
 
 #undef ino_t
 #undef time_t
+#ifdef __linux__
 #undef daddr_t
+#endif
+
 #define time_t time_t
 
 #include <sys/stat.h>   /* mkdir(2) */
@@ -44,6 +49,23 @@ typedef int dnix_ino_t;
 
 #define swap16(num) (((num >> 8) & 0xff) | ((num << 8) & 0xff00))
 
+bool sequential = false;
+
+int fseekWrapped (FILE * file, long pos, int type) {
+  if (!sequential) {
+    int track;
+    int head = 0;
+    int byte = (pos & 0xfff);
+    track = (pos & 0xff000) >> 12;
+    if (track>=80) {
+      head = 1;
+      track-=80;
+    }  
+    pos = byte | (head << 12) | (track << 13); 
+  }
+  return fseek(file, pos, type);
+}
+
 class DnixFs {
   struct sysfptr dnixPartitionInfo;
   struct sysfile sysfile;
@@ -52,6 +74,8 @@ class DnixFs {
   DnixFs();
   void init( FILE * image );
   bool readInode (int inumber, struct dinode * inode);
+  int  getVolumeSize ();
+  int  getBlockSize();
 };
 
 
@@ -62,9 +86,11 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
   time_t tim;
   int i;
   if (((inumber-1) * (sizeof dinode) + sysfile.s_inadr) > sysfile.s_insiz) {
+    fprintf(stderr, "inode=%d is outside the inode area.\n", inumber);
     return false;
   }
-  fseek (image, (inumber-1) * (sizeof dinode) + sysfile.s_inadr, SEEK_SET);
+  fprintf(stderr, "Diskaddress = %08lX\n",(inumber-1) * (sizeof dinode) + sysfile.s_inadr);
+  fseekWrapped (image, (inumber-1) * (sizeof dinode) + sysfile.s_inadr, SEEK_SET);
   fread ( (void * ) &dinode, sizeof dinode, 1, image);
 
   
@@ -94,6 +120,13 @@ bool DnixFs:: readInode (int inumber, struct dinode * inode) {
 
 }
 
+int DnixFs::getVolumeSize() {
+  return sysfile.s_vlsiz;
+}
+
+int DnixFs::getBlockSize() {
+  return sysfile.s_bksiz;
+}
 
 void DnixFs::init(FILE * img) {
   char buffer[26];
@@ -104,13 +137,13 @@ void DnixFs::init(FILE * img) {
   image = img;
   // Read the partition info
   
-  fseek (image, SYSFPTR, SEEK_SET);
+  fseekWrapped (image, SYSFPTR, SEEK_SET);
   fread ( (void * ) &dnixPartitionInfo, 512, 1, image);
   tim = swap32(dnixPartitionInfo.timestamp);
   tm_info = localtime((time_t *) ( &tim));
   strftime(buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
   superblock_address = swap32(dnixPartitionInfo.vdsp);
-  fseek (image, superblock_address, SEEK_SET);
+  fseekWrapped (image, superblock_address, SEEK_SET);
   fread ( (void *) &s, sizeof sysfile, 1, image);
   memcpy ( (void *) &sysfile, (void *) &s, sizeof sysfile);
   
@@ -125,8 +158,13 @@ void DnixFs::init(FILE * img) {
   sysfile.s_disiz = swap32(s.s_disiz);
   sysfile.s_insiz = swap32(s.s_insiz);
   sysfile.s_time = swap32(s.s_time); 
-  
 
+  fprintf(stderr, "sysfile.s_inadr=%08X\n",sysfile.s_inadr);
+  fprintf(stderr, "sysfile.s_insiz=%08X\n",sysfile.s_insiz);
+  fprintf(stderr, "sysfile.s_bmsiz=%08X\n",sysfile.s_bmsiz);   
+  fprintf(stderr, "sysfile.s_disiz=%08X\n",sysfile.s_disiz);
+  fprintf(stderr, "sysfile.s_vlsiz=%08X\n",sysfile.s_vlsiz);  
+  
   tim = sysfile.s_time;
   
   tm_info = localtime((time_t *) ( &tim));
@@ -143,54 +181,70 @@ struct BlockCache {
 class DnixFile {
   struct dinode ino;
   FILE * image;
+  int volumeSize;
+  int blockSize;
   struct BlockCache blockCache [3];
   void updateBlockCache(long disk_address, int level);
 public:
-  void init( FILE * image, struct dinode * inode );
-  void readFileBlock( int block_no, void * buf );
+  void init( FILE * image, struct dinode * inode, int size, int blockSize);
+  bool readFileBlock( int block_no, void * buf);
 };
 
 
 void DnixFile::updateBlockCache(long disk_address, int level) {
   if (disk_address != blockCache[level].disk_address) {
-      fseek (image, disk_address, SEEK_SET);
+      fseekWrapped (image, disk_address, SEEK_SET);
       fread (blockCache[level].block, 2048, 1, image);
   }
 }
 
-void DnixFile::init(FILE * img, struct dinode * inode) {
+void DnixFile::init(FILE * img, struct dinode * inode, int size, int bSz ) {
   memcpy (&ino, inode, sizeof (struct dinode));
   image = img;
+  volumeSize = size;
+  blockSize = bSz;
 }
 
-void DnixFile::readFileBlock ( int block_no, void * buf ) {
+bool DnixFile::readFileBlock ( int block_no, void * buf ) {
   long disk_address;
   if (block_no<11) {
     // direct blocks
     disk_address = (((0xff& ino.di_addr[block_no*3]) <<16 ) | ((0xff & ino.di_addr[block_no*3 + 1]) <<8 ) | (ino.di_addr[block_no*3 + 2] & 0xff)) <<8;
+    if (disk_address > volumeSize) return false;
   } else if ((block_no > 10) && (block_no < 522)) {
     disk_address = (((0xff& ino.di_addr[30]) <<16 ) | ((0xff & ino.di_addr[31]) <<8 ) | (ino.di_addr[32] & 0xff))<<8;
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 0);
     disk_address = swap32(blockCache[0].block[block_no-11]);
+    if (disk_address > volumeSize) return false;    
   } else if ((block_no >= 522) && (block_no < 262666)) {
     // Second level of indirect block
     disk_address = (((0xff& ino.di_addr[33]) <<16 ) | ((0xff & ino.di_addr[34]) <<8 ) | (ino.di_addr[35] & 0xff))<<8;
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 1);
     disk_address = swap32(blockCache[1].block[(block_no-522)>>9]);
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 0);
     disk_address = swap32(blockCache[0].block[(block_no-522) & 0x1ff]);
+    if (disk_address > volumeSize) return false;    
   } else {
     // Third level of indirect block 
     disk_address = (((0xff& ino.di_addr[36]) <<16 ) | ((0xff & ino.di_addr[37]) <<8 ) | (ino.di_addr[38] & 0xff))<<8;
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 2);
     disk_address = swap32(blockCache[2].block[(block_no-262666) >> 18]);
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 1);
     disk_address = swap32(blockCache[1].block[((block_no-262666) >>9) & 0x1ff]);
+    if (disk_address > volumeSize) return false;    
     updateBlockCache(disk_address, 0);
     disk_address = swap32(blockCache[0].block[(block_no-262266) & 0x1ff]);
+    if (disk_address > volumeSize) return false;    
   }
-  fseek (image, disk_address, SEEK_SET);
-  fread (buf, 2048, 1, image);
+  fprintf(stderr, "readFileBlock disk_address=%08lX\n", disk_address);
+  fseekWrapped (image, disk_address, SEEK_SET);
+  fread (buf, blockSize, 1, image);
+  return true;
 }
 
 
@@ -238,11 +292,11 @@ int mkdir_p(const char *path)
 }
 
 
-
-void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path) {
+void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path, int recursionCount) {
   char p [1024];
   const char * slash = "/";
   struct direct * dir;
+  char * buf;
   class DnixFile * file = new class DnixFile;
   int size;
   FILE *output;
@@ -251,43 +305,59 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path)
   bool ret;
   struct utimbuf timebuf;
   struct dinode inode;
+  if (recursionCount > 64) {
+    fprintf(stderr, "Too many levels of directories. Likely due to a damaged file system. Aborting..");
+    exit(1);
+  }
+  fprintf(stderr, "Reading inumber=%d\n", inumber);
   ret = dnixFs->readInode(inumber, &inode);
   if (!ret) return;
   dir = (struct direct *) malloc (2048);
-  file->init(image_file, &inode);
+  file->init(image_file, &inode, dnixFs->getVolumeSize(), dnixFs->getBlockSize());
   size = inode.di_size;
   if (inode.di_mode & 0x4000) {
     mkdir_p(path);
     block_no = 0;
     do {
-      file->readFileBlock(block_no, (void * ) dir);
-      dir_cnt=0;
-      do {
-	if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
-	  memset(p,0,sizeof p);
-	  strcpy(p, path);
-	  strcat(p, slash);
-	  strncat(p, dir[dir_cnt].d_name,14);
-	  readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p);
-	}
-	dir_cnt++;
-      } while ((dir_cnt < 128) && (swap16(dir[dir_cnt].d_ino) != 0)); 
+      ret=file->readFileBlock(block_no, (void * ) dir);
+      if (!ret) {
+	      fprintf(stderr, "Error reading filesystem. Tried to read block address outside volume.\n");
+      } else {
+	      dir_cnt=0;
+	      do {
+	        if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
+	          memset(p,0,sizeof p);
+	          strcpy(p, path);
+	          fprintf(stderr, "Path=%s\n", path);
+	          strcat(p, slash);
+	          strncat(p, dir[dir_cnt].d_name,14);
+	          readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p, recursionCount+1);
+	        }
+	        dir_cnt++;
+	      } while ((dir_cnt < 128) && (swap16(dir[dir_cnt].d_ino) != 0));
+      }
       size -= 2048;
       block_no ++;
     } while (size > 0 && swap16(dir[255].d_ino) !=0 );
   } else {    
     // Ordinary file
     output = fopen (path, "w");
+    buf = (char *) malloc(dnixFs->getBlockSize());
     do {
-      file->readFileBlock(block_no, (void * ) dir);
-      if (size >= 2048) {
-	fwrite(dir, 1, 2048, output);
+      ret=file->readFileBlock(block_no, (void *) buf);
+      if (!ret) {
+	      fprintf(stderr, "Error reading filesystem. Tried to read block address outside volume.\n");
       } else {
-	fwrite(dir, 1, size, output);
+	      if (size >= dnixFs->getBlockSize()) {
+	        fwrite(buf, 1, dnixFs->getBlockSize(), output);
+	      } else {
+	        fwrite(buf, 1, size, output);
+	      }
       }
-      size -= 2048;
+      size -= dnixFs->getBlockSize();
       block_no ++;
     } while (size > 0);
+    free(buf);
     fclose(output);
   }
   chmod (path, inode.di_mode & 07777);
@@ -303,14 +373,17 @@ int main (int argc, char ** argv) {
   FILE * image_file;
   int opt;
   class DnixFs dnixFs;
-  while ((opt = getopt(argc, argv, "d:")) != -1) {
+  while ((opt = getopt(argc, argv, "d:s")) != -1) {
     switch (opt) {
     case 'd':
       image_file = fopen (optarg, "r");
       if (image_file == NULL) {
-	perror ("Failure opening file.");
-	exit(EXIT_FAILURE);
+	      perror ("Failure opening file.");
+	      exit(EXIT_FAILURE);
       }
+      break;
+    case 's':
+      sequential = true; 
       break;
     default: /* '?' */
       fprintf(stderr, "Usage: %s [-d disk-image-file]\n", argv[0]);
@@ -319,7 +392,7 @@ int main (int argc, char ** argv) {
   }
 
   dnixFs.init(image_file);
-  readDir(INOROOT, image_file, &dnixFs, (char *) ".");
+  readDir(INOROOT, image_file, &dnixFs, (char *) ".",0);
 }
 
 

@@ -51,6 +51,13 @@ typedef int dnix_ino_t;
 
 bool sequential = false;
 
+static void printUsage(const char *prog) {
+  fprintf(stderr, "Usage: %s -d disk-image-file [-s] [-h]\n", prog);
+  fprintf(stderr, "  -d FILE   DNIX/ABCenix disk image file to traverse\n");
+  fprintf(stderr, "  -s        Use sequential block addressing\n");
+  fprintf(stderr, "  -h        Show this help text\n");
+}
+
 int fseekWrapped (FILE * file, long pos, int type) {
   if (!sequential) {
     int track;
@@ -302,6 +309,7 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path,
   FILE *output;
   int block_no=0;
   int dir_cnt;
+  int entries_per_block;
   bool ret;
   struct utimbuf timebuf;
   struct dinode inode;
@@ -312,7 +320,8 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path,
   fprintf(stderr, "Reading inumber=%d\n", inumber);
   ret = dnixFs->readInode(inumber, &inode);
   if (!ret) return;
-  dir = (struct direct *) malloc (2048);
+  entries_per_block = dnixFs->getBlockSize() / (int)sizeof(struct direct);
+  dir = (struct direct *) malloc (dnixFs->getBlockSize());
   file->init(image_file, &inode, dnixFs->getVolumeSize(), dnixFs->getBlockSize());
   size = inode.di_size;
   if (inode.di_mode & 0x4000) {
@@ -325,23 +334,30 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path,
       } else {
 	      dir_cnt=0;
 	      do {
-	        if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (strlen(dir[dir_cnt].d_name) > 2)) {
+	        int name_len = strnlen(dir[dir_cnt].d_name, DIRSIZ);
+	        if (((strncmp(dir[dir_cnt].d_name,".",1)!=0) && (strncmp(dir[dir_cnt].d_name,"..",2)!=0)) || (name_len > 2)) {
 	          memset(p,0,sizeof p);
 	          strcpy(p, path);
 	          fprintf(stderr, "Path=%s\n", path);
 	          strcat(p, slash);
-	          strncat(p, dir[dir_cnt].d_name,14);
+	          strncat(p, dir[dir_cnt].d_name, name_len);
 	          readDir(swap16(dir[dir_cnt].d_ino), image_file, dnixFs, p, recursionCount+1);
 	        }
 	        dir_cnt++;
-	      } while ((dir_cnt < 128) && (swap16(dir[dir_cnt].d_ino) != 0));
+	      } while ((dir_cnt < entries_per_block) && (swap16(dir[dir_cnt].d_ino) != 0));
       }
-      size -= 2048;
+      size -= dnixFs->getBlockSize();
       block_no ++;
-    } while (size > 0 && swap16(dir[255].d_ino) !=0 );
+    } while (size > 0 && ret && dir_cnt == entries_per_block);
   } else {    
     // Ordinary file
     output = fopen (path, "w");
+    if (output == NULL) {
+      fprintf(stderr, "Cannot create output file '%s': %s\n", path, strerror(errno));
+      free(dir);
+      delete file;
+      return;
+    }
     buf = (char *) malloc(dnixFs->getBlockSize());
     do {
       ret=file->readFileBlock(block_no, (void *) buf);
@@ -360,6 +376,7 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path,
     free(buf);
     fclose(output);
   }
+  free(dir);
   chmod (path, inode.di_mode & 07777);
   chown (path, inode.di_gid, inode.di_uid);
   timebuf.actime = inode.di_atime;
@@ -370,10 +387,10 @@ void readDir(int inumber, FILE * image_file, class DnixFs * dnixFs, char * path,
 
 
 int main (int argc, char ** argv) {
-  FILE * image_file;
+  FILE * image_file = NULL;
   int opt;
   class DnixFs dnixFs;
-  while ((opt = getopt(argc, argv, "d:s")) != -1) {
+  while ((opt = getopt(argc, argv, "d:sh")) != -1) {
     switch (opt) {
     case 'd':
       image_file = fopen (optarg, "r");
@@ -385,10 +402,18 @@ int main (int argc, char ** argv) {
     case 's':
       sequential = true; 
       break;
+    case 'h':
+      printUsage(argv[0]);
+      exit(EXIT_SUCCESS);
     default: /* '?' */
-      fprintf(stderr, "Usage: %s [-d disk-image-file]\n", argv[0]);
+      printUsage(argv[0]);
       exit(EXIT_FAILURE);
     }
+  }
+
+  if (image_file == NULL) {
+    printUsage(argv[0]);
+    exit(EXIT_FAILURE);
   }
 
   dnixFs.init(image_file);

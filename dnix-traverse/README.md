@@ -5,5 +5,11 @@ Compiling:
 c++ dnix-traverse.cpp -o dnix-traverse
 
 usage:
-dnix-traverse -d image-file
+dnix-traverse -d image-file [-s] [-h]
+
+options:
+- -d image-file: DNIX/ABCenix disk image file
+- -s: use sequential block addressing
+- -h: show help
+
 
